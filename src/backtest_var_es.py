@@ -13,7 +13,9 @@ INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "portfolio_returns.csv"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "processed"
 WINDOW_SIZE = 1_000
 CONFIDENCE_LEVELS = (0.95, 0.99)
-MODELS = ("historical", "normal")
+EWMA_DECAY_FACTOR = 0.94
+EWMA_INITIALIZATION_SIZE = 20
+MODELS = ("historical", "normal", "ewma_fhs")
 
 
 def historical_es(window_returns: np.ndarray, tail_probability: float) -> float:
@@ -23,6 +25,45 @@ def historical_es(window_returns: np.ndarray, tail_probability: float) -> float:
     return -float(tail_returns.mean())
 
 
+def ewma_filtered_risk(window_returns: np.ndarray) -> dict[str, float]:
+    """Estimate tail risk from EWMA-standardized returns in one window."""
+    mean_return = float(window_returns.mean())
+    residuals = window_returns - mean_return
+    initial_residuals = residuals[:EWMA_INITIALIZATION_SIZE]
+    variance = float(np.var(initial_residuals, ddof=1))
+
+    if not np.isfinite(variance) or variance <= 0:
+        raise ValueError("EWMA volatility could not be initialized from this window.")
+
+    standardized_residuals = []
+    for residual in residuals[EWMA_INITIALIZATION_SIZE:]:
+        standardized_residuals.append(residual / sqrt(variance))
+        variance = (
+            EWMA_DECAY_FACTOR * variance
+            + (1 - EWMA_DECAY_FACTOR) * residual**2
+        )
+
+    next_day_volatility = sqrt(variance)
+    shocks = np.asarray(standardized_residuals)
+    estimates = {}
+
+    for confidence in CONFIDENCE_LEVELS:
+        level = int(confidence * 100)
+        tail_probability = 1 - confidence
+        shock_cutoff = np.quantile(shocks, tail_probability)
+        tail_shocks = shocks[shocks <= shock_cutoff]
+        shock_es = float(tail_shocks.mean())
+
+        estimates[f"ewma_fhs_var_{level}"] = -(
+            mean_return + next_day_volatility * shock_cutoff
+        )
+        estimates[f"ewma_fhs_es_{level}"] = -(
+            mean_return + next_day_volatility * shock_es
+        )
+
+    return estimates
+
+
 def make_forecasts(portfolio_returns: pd.Series) -> pd.DataFrame:
     """Make one-day forecasts using only the preceding rolling window."""
     prior_returns = portfolio_returns.shift(1)
@@ -30,6 +71,17 @@ def make_forecasts(portfolio_returns: pd.Series) -> pd.DataFrame:
     forecasts = pd.DataFrame({"portfolio_return": portfolio_returns})
     rolling_mean = rolling.mean()
     rolling_standard_deviation = rolling.std()
+    return_values = portfolio_returns.to_numpy()
+    ewma_estimates = {
+        f"ewma_fhs_{kind}_{int(level * 100)}": np.full(len(return_values), np.nan)
+        for level in CONFIDENCE_LEVELS
+        for kind in ("var", "es")
+    }
+
+    for position in range(WINDOW_SIZE, len(return_values)):
+        prior_window = return_values[position - WINDOW_SIZE : position]
+        for key, value in ewma_filtered_risk(prior_window).items():
+            ewma_estimates[key][position] = value
 
     for confidence in CONFIDENCE_LEVELS:
         level = int(confidence * 100)
@@ -61,6 +113,14 @@ def make_forecasts(portfolio_returns: pd.Series) -> pd.DataFrame:
         forecasts[f"normal_exception_{level}"] = (
             portfolio_returns < -normal_var
         ).where(normal_var.notna())
+
+        ewma_var = pd.Series(ewma_estimates[f"ewma_fhs_var_{level}"], index=forecasts.index)
+        ewma_es = pd.Series(ewma_estimates[f"ewma_fhs_es_{level}"], index=forecasts.index)
+        forecasts[f"ewma_fhs_var_{level}"] = ewma_var
+        forecasts[f"ewma_fhs_es_{level}"] = ewma_es
+        forecasts[f"ewma_fhs_exception_{level}"] = (
+            portfolio_returns < -ewma_var
+        ).where(ewma_var.notna())
 
     return forecasts
 

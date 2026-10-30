@@ -20,7 +20,7 @@ The models to compare are:
 
 1. Historical simulation
 2. A parametric model with normally distributed returns
-3. A volatility-aware model, such as filtered historical simulation using GARCH
+3. Filtered historical simulation with EWMA volatility
 
 For each method, the project will estimate 95% and 99% VaR and ES. The estimates will be tested against returns that were not used to fit the models. The comparison will consider how often losses exceed VaR, the size of losses beyond VaR, and how results differ across market conditions.
 
@@ -30,8 +30,9 @@ The first comparison uses the previous 1,000 trading days of portfolio returns t
 
 - Historical simulation, which estimates the tail from observed returns
 - A normal model, which estimates the tail from the rolling mean and standard deviation
+- EWMA filtered historical simulation, which rescales past returns by their estimated volatility before estimating the tail
 
-Each day's forecast uses only earlier returns. The script saves forecasts and a summary of VaR exceptions for both models.
+Each day's forecast uses only earlier returns. All models use a 1,000-day window. The EWMA model uses a daily decay factor of 0.94, following the [RiskMetrics technical document](https://www.msci.com/documents/10199/5915b101-4206-4ba0-aee2-3449d5c7e95a). The script saves forecasts and a summary of VaR exceptions for each model.
 
 Run it after downloading the data:
 
@@ -57,4 +58,4 @@ It writes `var_es_forecasts.csv` and `var_es_summary.csv` to `data/processed/`.
 
 ## Project status
 
-The data pipeline is in place, and rolling historical and normal-model baselines have been implemented. The next step is to add a volatility-aware model and compare exception behavior across methods.
+The data pipeline and three rolling VaR/ES models are in place. The next step is to assess exception timing and clustering, then add charts and interpret the comparison.
