@@ -1,4 +1,4 @@
-"""Plot realized losses, VaR, ES, and exceptions for the three models."""
+"""Plot realized losses, VaR, ES, and exceptions for all models."""
 
 from pathlib import Path
 
@@ -14,6 +14,7 @@ MODELS = (
     ("historical", "Historical simulation"),
     ("normal", "Normal model"),
     ("ewma_fhs", "EWMA filtered historical simulation"),
+    ("garch", "GARCH(1,1) with normal innovations"),
 )
 
 
@@ -44,7 +45,7 @@ def main() -> None:
     fig, axes = plt.subplots(
         len(MODELS),
         1,
-        figsize=(14, 10),
+        figsize=(14, 12),
         sharex=True,
         sharey=True,
     )

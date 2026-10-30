@@ -1,4 +1,4 @@
-"""Compare rolling historical and normal-model VaR and ES forecasts."""
+"""Compare historical, normal, EWMA, and GARCH VaR and ES forecasts."""
 
 from math import erfc, exp, log, pi, sqrt
 from pathlib import Path
@@ -6,6 +6,7 @@ from statistics import NormalDist
 
 import numpy as np
 import pandas as pd
+from arch import arch_model
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +19,8 @@ EWMA_DECAY_FACTOR = 0.94
 EWMA_INITIALIZATION_SIZE = 20
 REGIME_VOLATILITY_WINDOW = 20
 REGIME_HIGH_VOLATILITY_QUANTILE = 0.75
-MODELS = ("historical", "normal", "ewma_fhs")
+GARCH_REFIT_INTERVAL = 21
+MODELS = ("historical", "normal", "ewma_fhs", "garch")
 
 
 def historical_es(window_returns: np.ndarray, tail_probability: float) -> float:
@@ -82,11 +84,55 @@ def make_forecasts(
         for level in CONFIDENCE_LEVELS
         for kind in ("var", "es")
     }
+    garch_mean_estimates = np.full(len(return_values), np.nan)
+    garch_variance_estimates = np.full(len(return_values), np.nan)
+    garch_parameters = None
+    garch_variance_pct_squared = None
 
     for position in range(window_size, len(return_values)):
         prior_window = return_values[position - window_size : position]
         for key, value in ewma_filtered_risk(prior_window).items():
             ewma_estimates[key][position] = value
+
+        should_refit_garch = (position - window_size) % GARCH_REFIT_INTERVAL == 0
+        if should_refit_garch:
+            fitted_garch = arch_model(
+                prior_window * 100,
+                mean="Constant",
+                vol="GARCH",
+                p=1,
+                o=0,
+                q=1,
+                dist="normal",
+                rescale=False,
+            ).fit(update_freq=0, disp="off")
+            if fitted_garch.convergence_flag != 0:
+                raise RuntimeError(
+                    f"GARCH(1,1) estimation did not converge at "
+                    f"{portfolio_returns.index[position]} (window={window_size})."
+                )
+            parameters = fitted_garch.params
+            garch_parameters = (
+                float(parameters["mu"]),
+                float(parameters["omega"]),
+                float(parameters["alpha[1]"]),
+                float(parameters["beta[1]"]),
+            )
+            garch_variance_pct_squared = float(
+                fitted_garch.forecast(horizon=1, reindex=False)
+                .residual_variance.iloc[-1, 0]
+            )
+        else:
+            mean_pct, omega, alpha, beta = garch_parameters
+            latest_innovation_pct = return_values[position - 1] * 100 - mean_pct
+            garch_variance_pct_squared = (
+                omega
+                + alpha * latest_innovation_pct**2
+                + beta * garch_variance_pct_squared
+            )
+
+        garch_mean_estimates[position] = garch_parameters[0] / 100
+        garch_variance_estimates[position] = garch_variance_pct_squared / 10_000
 
     for confidence in CONFIDENCE_LEVELS:
         level = int(confidence * 100)
@@ -126,6 +172,21 @@ def make_forecasts(
         forecasts[f"ewma_fhs_exception_{level}"] = (
             portfolio_returns < -ewma_var
         ).where(ewma_var.notna())
+
+        garch_mean = pd.Series(garch_mean_estimates, index=forecasts.index)
+        garch_standard_deviation = pd.Series(
+            np.sqrt(garch_variance_estimates), index=forecasts.index
+        )
+        garch_var = -(garch_mean + normal_quantile * garch_standard_deviation)
+        garch_expected_shortfall = -(
+            garch_mean
+            - garch_standard_deviation * normal_density / tail_probability
+        )
+        forecasts[f"garch_var_{level}"] = garch_var
+        forecasts[f"garch_es_{level}"] = garch_expected_shortfall
+        forecasts[f"garch_exception_{level}"] = (
+            portfolio_returns < -garch_var
+        ).where(garch_var.notna())
 
     return forecasts
 
