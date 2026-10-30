@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "portfolio_returns.csv"
 OUTPUT_DIR = PROJECT_ROOT / "data" / "processed"
 WINDOW_SIZE = 1_000
+SENSITIVITY_WINDOW_SIZES = (500, 1_000, 1_500)
 CONFIDENCE_LEVELS = (0.95, 0.99)
 EWMA_DECAY_FACTOR = 0.94
 EWMA_INITIALIZATION_SIZE = 20
@@ -66,10 +67,12 @@ def ewma_filtered_risk(window_returns: np.ndarray) -> dict[str, float]:
     return estimates
 
 
-def make_forecasts(portfolio_returns: pd.Series) -> pd.DataFrame:
+def make_forecasts(
+    portfolio_returns: pd.Series, window_size: int = WINDOW_SIZE
+) -> pd.DataFrame:
     """Make one-day forecasts using only the preceding rolling window."""
     prior_returns = portfolio_returns.shift(1)
-    rolling = prior_returns.rolling(WINDOW_SIZE, min_periods=WINDOW_SIZE)
+    rolling = prior_returns.rolling(window_size, min_periods=window_size)
     forecasts = pd.DataFrame({"portfolio_return": portfolio_returns})
     rolling_mean = rolling.mean()
     rolling_standard_deviation = rolling.std()
@@ -80,8 +83,8 @@ def make_forecasts(portfolio_returns: pd.Series) -> pd.DataFrame:
         for kind in ("var", "es")
     }
 
-    for position in range(WINDOW_SIZE, len(return_values)):
-        prior_window = return_values[position - WINDOW_SIZE : position]
+    for position in range(window_size, len(return_values)):
+        prior_window = return_values[position - window_size : position]
         for key, value in ewma_filtered_risk(prior_window).items():
             ewma_estimates[key][position] = value
 
@@ -199,7 +202,9 @@ def fz0_score(losses: np.ndarray, var: np.ndarray, es: np.ndarray, tail_rate: fl
     return float(score.mean())
 
 
-def summarize_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
+def summarize_forecasts(
+    forecasts: pd.DataFrame, window_size: int = WINDOW_SIZE
+) -> pd.DataFrame:
     """Summarize VaR coverage diagnostics and joint VaR-ES forecast scores."""
     rows = []
 
@@ -234,7 +239,7 @@ def summarize_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
                 {
                     "model": model,
                     "confidence_level": confidence,
-                    "window_size_days": WINDOW_SIZE,
+                    "window_size_days": window_size,
                     "forecast_count": len(scored),
                     "expected_exception_rate": 1 - confidence,
                     "exception_count": int(exceptions.sum()),
@@ -259,7 +264,9 @@ def summarize_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def summarize_by_volatility_regime(forecasts: pd.DataFrame) -> pd.DataFrame:
+def summarize_by_volatility_regime(
+    forecasts: pd.DataFrame, window_size: int = WINDOW_SIZE
+) -> pd.DataFrame:
     """Compare forecasts when lagged volatility is below or above a training cutoff."""
     prior_volatility = (
         forecasts["portfolio_return"]
@@ -268,7 +275,7 @@ def summarize_by_volatility_regime(forecasts: pd.DataFrame) -> pd.DataFrame:
         .shift(1)
         * sqrt(252)
     )
-    training_volatility = prior_volatility.iloc[:WINDOW_SIZE].dropna()
+    training_volatility = prior_volatility.iloc[:window_size].dropna()
     threshold = float(
         training_volatility.quantile(REGIME_HIGH_VOLATILITY_QUANTILE)
     )
@@ -333,21 +340,42 @@ def main() -> None:
     portfolio_returns = returns["portfolio_return"].dropna()
     forecasts = make_forecasts(portfolio_returns)
     summary = summarize_forecasts(forecasts)
-    regime_summary = summarize_by_volatility_regime(forecasts)
+    regime_summary = summarize_by_volatility_regime(forecasts, WINDOW_SIZE)
+    common_evaluation_start = max(SENSITIVITY_WINDOW_SIZES)
+    sensitivity_summaries = []
+    for window_size in SENSITIVITY_WINDOW_SIZES:
+        window_forecasts = (
+            forecasts
+            if window_size == WINDOW_SIZE
+            else make_forecasts(portfolio_returns, window_size)
+        )
+        common_period_forecasts = window_forecasts.iloc[common_evaluation_start:]
+        sensitivity_summaries.append(
+            summarize_forecasts(common_period_forecasts, window_size)
+        )
+    sensitivity_summary = pd.concat(sensitivity_summaries, ignore_index=True)
+    sensitivity_summary["evaluation_start_date"] = portfolio_returns.index[
+        common_evaluation_start
+    ]
+    sensitivity_summary["evaluation_end_date"] = portfolio_returns.index[-1]
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     forecasts_path = OUTPUT_DIR / "var_es_forecasts.csv"
     summary_path = OUTPUT_DIR / "var_es_summary.csv"
     regime_summary_path = OUTPUT_DIR / "var_es_regime_summary.csv"
+    sensitivity_summary_path = OUTPUT_DIR / "var_es_window_sensitivity.csv"
     forecasts.to_csv(forecasts_path, index_label="date")
     summary.to_csv(summary_path, index=False)
     regime_summary.to_csv(regime_summary_path, index=False)
+    sensitivity_summary.to_csv(sensitivity_summary_path, index=False)
 
     print(f"Saved forecasts to {forecasts_path}")
     print(f"Saved comparison summary to {summary_path}")
     print(f"Saved volatility-regime summary to {regime_summary_path}")
+    print(f"Saved window-sensitivity summary to {sensitivity_summary_path}")
     print(summary.to_string(index=False))
     print(regime_summary.to_string(index=False))
+    print(sensitivity_summary.to_string(index=False))
 
 
 if __name__ == "__main__":

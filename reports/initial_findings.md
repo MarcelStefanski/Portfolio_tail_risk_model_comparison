@@ -66,6 +66,28 @@ The tables show exception counts and rates alongside mean FZ0 scores. Lower scor
 
 In high-volatility periods, historical and normal models exceed their exception-rate targets at both levels. EWMA has fewer high-volatility exceptions than the target; in the lower-volatility group, all three models' 95% rates are close to 5%, and their 99% rates range from 0.76% to 1.37%. EWMA also has the lowest mean FZ0 score in each regime at both levels. These subgroup rates and score rankings are descriptive: no score-difference test was run, and the high-volatility 99% results contain only 2 to 18 exceptions per model.
 
+## Sensitivity to rolling-window length
+
+I compared 500-, 1,000-, and 1,500-day estimation windows over the same evaluation dates, 2012-12-18 through 2026-10-29 (3,487 forecasts per model and window). This keeps market conditions comparable across window sizes. The tables report exception rates and mean FZ0 scores; lower FZ0 scores are better within a confidence level.
+
+### 95% VaR and ES
+
+| Window | Historical exceptions | Normal exceptions | EWMA exceptions | Historical FZ0 | Normal FZ0 | EWMA FZ0 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 500 days | 5.79% | 5.33% | 5.05% | -4.178 | -4.128 | **-4.303** |
+| 1,000 days | 5.62% | 5.22% | 5.05% | -4.170 | -4.142 | **-4.310** |
+| 1,500 days | 5.68% | 5.19% | 4.96% | -4.115 | -4.083 | **-4.311** |
+
+### 99% VaR and ES
+
+| Window | Historical exceptions | Normal exceptions | EWMA exceptions | Historical FZ0 | Normal FZ0 | EWMA FZ0 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 500 days | 1.23% | 1.95% | 1.26% | -3.565 | -3.301 | **-3.843** |
+| 1,000 days | 1.12% | 1.84% | 1.23% | -3.609 | -3.309 | **-3.839** |
+| 1,500 days | 1.00% | 2.09% | 1.06% | -3.559 | -3.243 | **-3.859** |
+
+EWMA has the lowest mean FZ0 score for every window size at both levels, so that ranking is stable in this comparison. At 99%, the normal model exceeds the 1% exception target for all three windows, while historical and EWMA remain closer to target. The differences in FZ0 scores are not statistically tested, and the 99% exception counts are limited, so this is evidence of robustness within these choices rather than proof that one window is best.
+
 ## Exceptions by year at 99% VaR
 
 | Year | Forecast days | Historical | Normal | EWMA filtered historical | Expected at 1% |
@@ -90,4 +112,4 @@ The EWMA model's VaR and ES rise quickly around large return shocks and then dec
 - A 1,000-day window contains only about 10 observations beyond a 99% empirical quantile, so 99% historical and filtered-tail estimates are noisy.
 - The results depend on this portfolio, daily rebalancing assumption, sample period, and data source. They do not identify a universal best model.
 
-The next useful extension is to check whether the model rankings are sensitive to the 1,000-day rolling-window length and the volatility cutoff.
+The next useful extension is to compare these forecasts with a volatility model such as GARCH, while keeping the same evaluation period and scoring rules.

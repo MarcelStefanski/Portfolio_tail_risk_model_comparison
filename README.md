@@ -38,6 +38,8 @@ The summary also reports Kupiec unconditional-coverage tests and Christoffersen 
 
 The same script compares forecasts in lower- and high-volatility regimes. It classifies each date from annualized volatility over the prior 20 trading days, with the high-volatility cutoff set to the 75th percentile of the initial 1,000-day training period. This regime summary is saved as `var_es_regime_summary.csv` in `data/processed/`.
 
+It also compares 500-, 1,000-, and 1,500-day estimation windows on a shared evaluation period, so the results are not driven by different market dates. Those results are saved as `var_es_window_sensitivity.csv` in `data/processed/`.
+
 Run it after downloading the data:
 
 ```bash
@@ -74,4 +76,4 @@ See [the initial findings](reports/initial_findings.md) for the first exception-
 
 ## Project status
 
-The data pipeline, three rolling VaR/ES models, VaR exception diagnostics, joint VaR-ES scoring, a volatility-regime comparison, an out-of-sample 99% chart, and an initial findings report are in place. The current findings are specific to this portfolio and sample; a useful next step is to check sensitivity to the rolling-window length and volatility cutoff.
+The data pipeline, three rolling VaR/ES models, VaR exception diagnostics, joint VaR-ES scoring, volatility-regime and rolling-window comparisons, an out-of-sample 99% chart, and an initial findings report are in place. The current findings are specific to this portfolio and sample; a useful next step is to add and compare a GARCH volatility model.
