@@ -1,0 +1,8 @@
+# Downloaded market data is reproducible and should stay out of version control.
+data/
+
+# Python-generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]

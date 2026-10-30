@@ -10,7 +10,13 @@ This project compares statistical methods for estimating large losses in an inve
 
 ## Initial scope
 
-The first version will use daily historical asset returns to build a simple portfolio and compare a small set of approaches:
+The first version will use daily historical asset returns to build a simple portfolio and compare a small set of approaches. The initial data and portfolio assumptions are:
+
+- Daily adjusted prices for SPY (US equities) and TLT (long-term US Treasury bonds), downloaded with `yfinance`
+- Portfolio weights of 60% SPY and 40% TLT, rebalanced daily
+- Data starting on 2007-01-01 and continuing through the latest available date
+
+The models to compare are:
 
 1. Historical simulation
 2. A parametric model with normally distributed returns
@@ -34,4 +40,4 @@ For each method, the project will estimate 95% and 99% VaR and ES. The estimates
 
 ## Project status
 
-Planning stage. The data source, assets, portfolio construction, and final model choices will be selected during implementation.
+Initial data and portfolio scope selected. The model implementation and backtesting design will be developed next.
