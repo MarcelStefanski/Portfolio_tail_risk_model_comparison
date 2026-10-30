@@ -59,6 +59,8 @@ The chart is saved to `reports/figures/var_es_99_backtest.png`.
 - Backtesting results and a discussion of model limitations
 - A concise report explaining the methods and findings
 
+See [the initial findings](reports/initial_findings.md) for the first exception-rate comparison and its limitations.
+
 ## Skills demonstrated
 
 - Financial mathematics and portfolio return calculations
@@ -68,4 +70,4 @@ The chart is saved to `reports/figures/var_es_99_backtest.png`.
 
 ## Project status
 
-The data pipeline, three rolling VaR/ES models, and an out-of-sample 99% comparison chart are in place. Next, the exception timing and model limitations will be analyzed.
+The data pipeline, three rolling VaR/ES models, an out-of-sample 99% comparison chart, and an initial findings report are in place. Next, the exception timing and ES estimates need more formal evaluation.
