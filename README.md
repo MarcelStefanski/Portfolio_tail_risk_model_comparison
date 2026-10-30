@@ -42,6 +42,16 @@ python3 src/backtest_var_es.py
 
 It writes `var_es_forecasts.csv` and `var_es_summary.csv` to `data/processed/`.
 
+Generate the 99% VaR/ES comparison chart after the model script:
+
+```bash
+python3 src/plot_var_es.py
+```
+
+The chart is saved to `reports/figures/var_es_99_backtest.png`.
+
+![Out-of-sample 99% VaR and ES forecasts with exceptions highlighted](reports/figures/var_es_99_backtest.png)
+
 ## Planned outputs
 
 - Reproducible analysis code
@@ -58,4 +68,4 @@ It writes `var_es_forecasts.csv` and `var_es_summary.csv` to `data/processed/`.
 
 ## Project status
 
-The data pipeline and three rolling VaR/ES models are in place. The next step is to assess exception timing and clustering, then add charts and interpret the comparison.
+The data pipeline, three rolling VaR/ES models, and an out-of-sample 99% comparison chart are in place. Next, the exception timing and model limitations will be analyzed.
