@@ -1,6 +1,6 @@
 """Compare rolling historical and normal-model VaR and ES forecasts."""
 
-from math import exp, pi, sqrt
+from math import erfc, exp, log, pi, sqrt
 from pathlib import Path
 from statistics import NormalDist
 
@@ -125,8 +125,80 @@ def make_forecasts(portfolio_returns: pd.Series) -> pd.DataFrame:
     return forecasts
 
 
+def log_likelihood(counts: tuple[int, ...], probabilities: tuple[float, ...]) -> float:
+    """Calculate a binomial log likelihood, including zero-count terms safely."""
+    total = 0.0
+    for count, probability in zip(counts, probabilities):
+        if count == 0:
+            continue
+        if probability <= 0:
+            return -np.inf
+        total += count * log(probability)
+    return total
+
+
+def kupiec_uc_test(exceptions: np.ndarray, target_rate: float) -> tuple[float, float]:
+    """Return Kupiec unconditional-coverage LR statistic and chi-square p-value."""
+    count = int(exceptions.sum())
+    total = len(exceptions)
+    observed_rate = count / total
+    null_log_likelihood = log_likelihood(
+        (count, total - count), (target_rate, 1 - target_rate)
+    )
+    fitted_log_likelihood = log_likelihood(
+        (count, total - count), (observed_rate, 1 - observed_rate)
+    )
+    statistic = max(0.0, 2 * (fitted_log_likelihood - null_log_likelihood))
+    return statistic, erfc(sqrt(statistic / 2))
+
+
+def christoffersen_independence_test(
+    exceptions: np.ndarray,
+) -> tuple[float, float]:
+    """Return Christoffersen first-order independence LR statistic and p-value."""
+    indicators = exceptions.astype(int)
+    previous = indicators[:-1]
+    current = indicators[1:]
+    n00 = int(((previous == 0) & (current == 0)).sum())
+    n01 = int(((previous == 0) & (current == 1)).sum())
+    n10 = int(((previous == 1) & (current == 0)).sum())
+    n11 = int(((previous == 1) & (current == 1)).sum())
+    transition_count = n00 + n01 + n10 + n11
+    if transition_count == 0:
+        return np.nan, np.nan
+
+    probability_01 = n01 / (n00 + n01) if n00 + n01 else 0.0
+    probability_11 = n11 / (n10 + n11) if n10 + n11 else 0.0
+    probability_null = (n01 + n11) / transition_count
+    alternative_log_likelihood = log_likelihood(
+        (n00, n01, n10, n11),
+        (1 - probability_01, probability_01, 1 - probability_11, probability_11),
+    )
+    null_log_likelihood = log_likelihood(
+        (n00 + n10, n01 + n11),
+        (1 - probability_null, probability_null),
+    )
+    statistic = max(
+        0.0, 2 * (alternative_log_likelihood - null_log_likelihood)
+    )
+    return statistic, erfc(sqrt(statistic / 2))
+
+
+def fz0_score(losses: np.ndarray, var: np.ndarray, es: np.ndarray, tail_rate: float) -> float:
+    """Return the mean joint VaR-ES FZ0 score for positive loss forecasts."""
+    if np.any(es <= 0):
+        raise ValueError("FZ0 scoring requires positive expected-shortfall forecasts.")
+    score = (
+        (losses >= var) * (losses - var) / (tail_rate * es)
+        + var / es
+        + np.log(es)
+        - 1
+    )
+    return float(score.mean())
+
+
 def summarize_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
-    """Summarize forecast coverage and the frequency of VaR exceptions."""
+    """Summarize VaR coverage diagnostics and joint VaR-ES forecast scores."""
     rows = []
 
     for model in MODELS:
@@ -137,7 +209,24 @@ def summarize_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
             exception_column = f"{model}_exception_{level}"
             scored = forecasts.dropna(subset=[var_column, es_column])
             exceptions = scored[exception_column].astype(bool)
+            exception_values = exceptions.to_numpy()
             realized_losses = -scored["portfolio_return"]
+            uc_statistic, uc_p_value = kupiec_uc_test(
+                exception_values, 1 - confidence
+            )
+            independence_statistic, independence_p_value = (
+                christoffersen_independence_test(exception_values)
+            )
+            conditional_coverage_statistic = uc_statistic + independence_statistic
+            conditional_coverage_p_value = exp(
+                -conditional_coverage_statistic / 2
+            )
+            mean_fz0_score = fz0_score(
+                realized_losses.to_numpy(),
+                scored[var_column].to_numpy(),
+                scored[es_column].to_numpy(),
+                1 - confidence,
+            )
 
             rows.append(
                 {
@@ -148,6 +237,13 @@ def summarize_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
                     "expected_exception_rate": 1 - confidence,
                     "exception_count": int(exceptions.sum()),
                     "observed_exception_rate": float(exceptions.mean()),
+                    "kupiec_uc_lr": uc_statistic,
+                    "kupiec_uc_p_value": uc_p_value,
+                    "christoffersen_ind_lr": independence_statistic,
+                    "christoffersen_ind_p_value": independence_p_value,
+                    "christoffersen_cc_lr": conditional_coverage_statistic,
+                    "christoffersen_cc_p_value": conditional_coverage_p_value,
+                    "mean_fz0_score": mean_fz0_score,
                     "mean_var": float(scored[var_column].mean()),
                     "mean_es": float(scored[es_column].mean()),
                     "mean_loss_on_exceptions": (

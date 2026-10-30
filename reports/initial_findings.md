@@ -18,6 +18,30 @@ At the 99% level, the normal model records more exceptions than its 1% target. I
 
 The historical and EWMA models have aggregate 99% exception rates closer to 1%. That alone does not establish that either model is reliable: the exceptions are unevenly distributed through time.
 
+## Formal VaR diagnostics and joint VaR-ES scores
+
+The summary now includes the Kupiec unconditional-coverage test, which checks whether the exception frequency matches its target, and Christoffersen's first-order independence and conditional-coverage tests, which check whether exceptions cluster over time. The likelihood-ratio p-values use their asymptotic chi-square distributions. At the 5% level, the results are:
+
+### 95% VaR
+
+| Model | UC p-value | Independence p-value | Conditional-coverage p-value | Mean FZ0 score |
+| --- | ---: | ---: | ---: | ---: |
+| Historical simulation | 0.980 | <0.001 | <0.001 | -4.172 |
+| Normal model | 0.259 | <0.001 | <0.001 | -4.144 |
+| EWMA filtered historical simulation | 0.905 | 0.018 | 0.060 | **-4.345** |
+
+### 99% VaR
+
+| Model | UC p-value | Independence p-value | Conditional-coverage p-value | Mean FZ0 score |
+| --- | ---: | ---: | ---: | ---: |
+| Historical simulation | 0.984 | <0.001 | <0.001 | -3.611 |
+| Normal model | <0.001 | <0.001 | <0.001 | -3.373 |
+| EWMA filtered historical simulation | 0.341 | 0.002 | 0.005 | **-3.894** |
+
+At 95%, none of the models is rejected by the unconditional-coverage test, but historical and normal exceptions are strongly dependent. EWMA's independence test also rejects at 5%; its combined conditional-coverage p-value is 0.060, just above that cutoff. At 99%, historical and EWMA exception counts are consistent with their 1% target, while the normal model has too many exceptions. All three models show dependent exceptions, so none passes the combined conditional-coverage test.
+
+The FZ0 column is the mean joint VaR-ES score for positive loss forecasts; a lower score is better. EWMA has the lowest score at both levels in this sample. This is a comparative score, not a standalone statistical acceptance test for ES, so it does not establish that EWMA is universally best. The score follows the joint VaR and ES scoring framework of [Fissler, Ziegel, and Gneiting](https://arxiv.org/abs/1507.00244). The coverage tests follow [Kupiec](https://fedinprint.org/item/fedgfe/34596/original) and [Christoffersen](https://users.ssc.wisc.edu/~bhansen/718/Christoffersen1998.pdf).
+
 ## Exceptions by year at 99% VaR
 
 | Year | Forecast days | Historical | Normal | EWMA filtered historical | Expected at 1% |
@@ -37,9 +61,9 @@ The EWMA model's VaR and ES rise quickly around large return shocks and then dec
 
 ## Limitations and next analysis
 
-- These exception rates are descriptive. The comparison has not yet tested whether exceptions are statistically independent or whether conditional coverage is adequate.
-- ES is estimated, but this analysis does not yet use a formal ES backtest. The average loss on VaR exception days is descriptive and should not be treated as an ES validation result.
+- The likelihood-ratio p-values are asymptotic. In particular, there are only 40 to 65 exceptions at 99%, so those test results should be interpreted cautiously.
+- The mean FZ0 scores rank joint VaR-ES forecasts in this sample but do not test whether score differences are statistically significant.
 - A 1,000-day window contains only about 10 observations beyond a 99% empirical quantile, so 99% historical and filtered-tail estimates are noisy.
 - The results depend on this portfolio, daily rebalancing assumption, sample period, and data source. They do not identify a universal best model.
 
-Next, add formal VaR exception diagnostics and a suitable ES scoring/backtesting method, then interpret how the models behave across calm and volatile periods.
+The next useful extension is to compare model performance across calm and volatile periods and to examine whether the conclusions are sensitive to the rolling-window length.

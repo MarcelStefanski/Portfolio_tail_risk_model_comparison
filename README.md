@@ -34,6 +34,8 @@ The first comparison uses the previous 1,000 trading days of portfolio returns t
 
 Each day's forecast uses only earlier returns. All models use a 1,000-day window. The EWMA model uses a daily decay factor of 0.94, following the [RiskMetrics technical document](https://www.msci.com/documents/10199/5915b101-4206-4ba0-aee2-3449d5c7e95a). The script saves forecasts and a summary of VaR exceptions for each model.
 
+The summary also reports Kupiec unconditional-coverage tests and Christoffersen independence and conditional-coverage tests for VaR exceptions. For joint VaR-ES comparison, it reports the mean FZ0 score, where a lower score is better. The [initial findings](reports/initial_findings.md) explain the results and their limitations; the tests follow [Kupiec](https://fedinprint.org/item/fedgfe/34596/original), [Christoffersen](https://users.ssc.wisc.edu/~bhansen/718/Christoffersen1998.pdf), and the joint scoring framework of [Fissler, Ziegel, and Gneiting](https://arxiv.org/abs/1507.00244).
+
 Run it after downloading the data:
 
 ```bash
@@ -70,4 +72,4 @@ See [the initial findings](reports/initial_findings.md) for the first exception-
 
 ## Project status
 
-The data pipeline, three rolling VaR/ES models, an out-of-sample 99% comparison chart, and an initial findings report are in place. Next, the exception timing and ES estimates need more formal evaluation.
+The data pipeline, three rolling VaR/ES models, VaR exception diagnostics, joint VaR-ES scoring, an out-of-sample 99% comparison chart, and an initial findings report are in place. The current findings are specific to this portfolio and sample; a useful next step is to compare performance across calm and volatile periods.
