@@ -42,6 +42,30 @@ At 95%, none of the models is rejected by the unconditional-coverage test, but h
 
 The FZ0 column is the mean joint VaR-ES score for positive loss forecasts; a lower score is better. EWMA has the lowest score at both levels in this sample. This is a comparative score, not a standalone statistical acceptance test for ES, so it does not establish that EWMA is universally best. The score follows the joint VaR and ES scoring framework of [Fissler, Ziegel, and Gneiting](https://arxiv.org/abs/1507.00244). The coverage tests follow [Kupiec](https://fedinprint.org/item/fedgfe/34596/original) and [Christoffersen](https://users.ssc.wisc.edu/~bhansen/718/Christoffersen1998.pdf).
 
+## Performance by volatility regime
+
+For each forecast date, I calculate annualized volatility from the previous 20 trading days. The high-volatility cutoff is the 75th percentile of those volatility estimates during the initial 1,000-day training window: 13.04% annualized. Each forecast is labeled using information available before that forecast. This leaves 3,428 lower-volatility dates and 559 high-volatility dates in the out-of-sample period. The lower-volatility group is everything at or below the cutoff; it does not necessarily mean markets were calm in an absolute sense.
+
+The tables show exception counts and rates alongside mean FZ0 scores. Lower scores are better when comparing models within the same confidence level and regime.
+
+### 95% VaR and ES
+
+| Model | Lower-volatility exceptions | High-volatility exceptions | Lower-volatility FZ0 | High-volatility FZ0 |
+| --- | ---: | ---: | ---: | ---: |
+| Historical simulation | 137 / 3,428 (4.00%) | 62 / 559 (11.09%) | -4.310 | -3.324 |
+| Normal model | 128 / 3,428 (3.73%) | 56 / 559 (10.02%) | -4.300 | -3.187 |
+| EWMA filtered historical simulation | 182 / 3,428 (5.31%) | 19 / 559 (3.40%) | **-4.440** | **-3.760** |
+
+### 99% VaR and ES
+
+| Model | Lower-volatility exceptions | High-volatility exceptions | Lower-volatility FZ0 | High-volatility FZ0 |
+| --- | ---: | ---: | ---: | ---: |
+| Historical simulation | 26 / 3,428 (0.76%) | 14 / 559 (2.50%) | -3.842 | -2.195 |
+| Normal model | 47 / 3,428 (1.37%) | 18 / 559 (3.22%) | -3.770 | -0.936 |
+| EWMA filtered historical simulation | 44 / 3,428 (1.28%) | 2 / 559 (0.36%) | **-3.982** | **-3.354** |
+
+In high-volatility periods, historical and normal models exceed their exception-rate targets at both levels. EWMA has fewer high-volatility exceptions than the target; in the lower-volatility group, all three models' 95% rates are close to 5%, and their 99% rates range from 0.76% to 1.37%. EWMA also has the lowest mean FZ0 score in each regime at both levels. These subgroup rates and score rankings are descriptive: no score-difference test was run, and the high-volatility 99% results contain only 2 to 18 exceptions per model.
+
 ## Exceptions by year at 99% VaR
 
 | Year | Forecast days | Historical | Normal | EWMA filtered historical | Expected at 1% |
@@ -66,4 +90,4 @@ The EWMA model's VaR and ES rise quickly around large return shocks and then dec
 - A 1,000-day window contains only about 10 observations beyond a 99% empirical quantile, so 99% historical and filtered-tail estimates are noisy.
 - The results depend on this portfolio, daily rebalancing assumption, sample period, and data source. They do not identify a universal best model.
 
-The next useful extension is to compare model performance across calm and volatile periods and to examine whether the conclusions are sensitive to the rolling-window length.
+The next useful extension is to check whether the model rankings are sensitive to the 1,000-day rolling-window length and the volatility cutoff.

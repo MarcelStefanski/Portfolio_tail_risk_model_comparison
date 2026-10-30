@@ -15,6 +15,8 @@ WINDOW_SIZE = 1_000
 CONFIDENCE_LEVELS = (0.95, 0.99)
 EWMA_DECAY_FACTOR = 0.94
 EWMA_INITIALIZATION_SIZE = 20
+REGIME_VOLATILITY_WINDOW = 20
+REGIME_HIGH_VOLATILITY_QUANTILE = 0.75
 MODELS = ("historical", "normal", "ewma_fhs")
 
 
@@ -257,6 +259,66 @@ def summarize_forecasts(forecasts: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def summarize_by_volatility_regime(forecasts: pd.DataFrame) -> pd.DataFrame:
+    """Compare forecasts when lagged volatility is below or above a training cutoff."""
+    prior_volatility = (
+        forecasts["portfolio_return"]
+        .rolling(REGIME_VOLATILITY_WINDOW, min_periods=REGIME_VOLATILITY_WINDOW)
+        .std()
+        .shift(1)
+        * sqrt(252)
+    )
+    training_volatility = prior_volatility.iloc[:WINDOW_SIZE].dropna()
+    threshold = float(
+        training_volatility.quantile(REGIME_HIGH_VOLATILITY_QUANTILE)
+    )
+    regime_labels = pd.Series(
+        np.where(prior_volatility > threshold, "high_volatility", "lower_volatility"),
+        index=forecasts.index,
+    )
+    rows = []
+
+    for model in MODELS:
+        for confidence in CONFIDENCE_LEVELS:
+            level = int(confidence * 100)
+            var_column = f"{model}_var_{level}"
+            es_column = f"{model}_es_{level}"
+            exception_column = f"{model}_exception_{level}"
+            scored = forecasts.dropna(subset=[var_column, es_column])
+
+            for regime in ("lower_volatility", "high_volatility"):
+                regime_scored = scored.loc[regime_labels.loc[scored.index] == regime]
+                if regime_scored.empty:
+                    continue
+                exceptions = regime_scored[exception_column].astype(bool)
+                realized_losses = -regime_scored["portfolio_return"].to_numpy()
+                var_forecasts = regime_scored[var_column].to_numpy()
+                es_forecasts = regime_scored[es_column].to_numpy()
+
+                rows.append(
+                    {
+                        "model": model,
+                        "confidence_level": confidence,
+                        "volatility_regime": regime,
+                        "forecast_count": len(regime_scored),
+                        "exception_count": int(exceptions.sum()),
+                        "observed_exception_rate": float(exceptions.mean()),
+                        "mean_fz0_score": fz0_score(
+                            realized_losses,
+                            var_forecasts,
+                            es_forecasts,
+                            1 - confidence,
+                        ),
+                        "mean_prior_20d_volatility": float(
+                            prior_volatility.loc[regime_scored.index].mean()
+                        ),
+                        "training_volatility_threshold": threshold,
+                    }
+                )
+
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     """Load portfolio returns and save forecasts and comparison summary."""
     if not INPUT_PATH.exists():
@@ -271,16 +333,21 @@ def main() -> None:
     portfolio_returns = returns["portfolio_return"].dropna()
     forecasts = make_forecasts(portfolio_returns)
     summary = summarize_forecasts(forecasts)
+    regime_summary = summarize_by_volatility_regime(forecasts)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     forecasts_path = OUTPUT_DIR / "var_es_forecasts.csv"
     summary_path = OUTPUT_DIR / "var_es_summary.csv"
+    regime_summary_path = OUTPUT_DIR / "var_es_regime_summary.csv"
     forecasts.to_csv(forecasts_path, index_label="date")
     summary.to_csv(summary_path, index=False)
+    regime_summary.to_csv(regime_summary_path, index=False)
 
     print(f"Saved forecasts to {forecasts_path}")
     print(f"Saved comparison summary to {summary_path}")
+    print(f"Saved volatility-regime summary to {regime_summary_path}")
     print(summary.to_string(index=False))
+    print(regime_summary.to_string(index=False))
 
 
 if __name__ == "__main__":

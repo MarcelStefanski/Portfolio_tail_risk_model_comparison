@@ -36,6 +36,8 @@ Each day's forecast uses only earlier returns. All models use a 1,000-day window
 
 The summary also reports Kupiec unconditional-coverage tests and Christoffersen independence and conditional-coverage tests for VaR exceptions. For joint VaR-ES comparison, it reports the mean FZ0 score, where a lower score is better. The [initial findings](reports/initial_findings.md) explain the results and their limitations; the tests follow [Kupiec](https://fedinprint.org/item/fedgfe/34596/original), [Christoffersen](https://users.ssc.wisc.edu/~bhansen/718/Christoffersen1998.pdf), and the joint scoring framework of [Fissler, Ziegel, and Gneiting](https://arxiv.org/abs/1507.00244).
 
+The same script compares forecasts in lower- and high-volatility regimes. It classifies each date from annualized volatility over the prior 20 trading days, with the high-volatility cutoff set to the 75th percentile of the initial 1,000-day training period. This regime summary is saved as `var_es_regime_summary.csv` in `data/processed/`.
+
 Run it after downloading the data:
 
 ```bash
@@ -72,4 +74,4 @@ See [the initial findings](reports/initial_findings.md) for the first exception-
 
 ## Project status
 
-The data pipeline, three rolling VaR/ES models, VaR exception diagnostics, joint VaR-ES scoring, an out-of-sample 99% comparison chart, and an initial findings report are in place. The current findings are specific to this portfolio and sample; a useful next step is to compare performance across calm and volatile periods.
+The data pipeline, three rolling VaR/ES models, VaR exception diagnostics, joint VaR-ES scoring, a volatility-regime comparison, an out-of-sample 99% chart, and an initial findings report are in place. The current findings are specific to this portfolio and sample; a useful next step is to check sensitivity to the rolling-window length and volatility cutoff.
