@@ -24,6 +24,23 @@ The models to compare are:
 
 For each method, the project will estimate 95% and 99% VaR and ES. The estimates will be tested against returns that were not used to fit the models. The comparison will consider how often losses exceed VaR, the size of losses beyond VaR, and how results differ across market conditions.
 
+## First model comparison
+
+The first comparison uses the previous 1,000 trading days of portfolio returns to forecast one-day 95% and 99% VaR and ES. It compares:
+
+- Historical simulation, which estimates the tail from observed returns
+- A normal model, which estimates the tail from the rolling mean and standard deviation
+
+Each day's forecast uses only earlier returns. The script saves forecasts and a summary of VaR exceptions for both models.
+
+Run it after downloading the data:
+
+```bash
+python3 src/backtest_var_es.py
+```
+
+It writes `var_es_forecasts.csv` and `var_es_summary.csv` to `data/processed/`.
+
 ## Planned outputs
 
 - Reproducible analysis code
@@ -40,4 +57,4 @@ For each method, the project will estimate 95% and 99% VaR and ES. The estimates
 
 ## Project status
 
-Initial data and portfolio scope selected. The model implementation and backtesting design will be developed next.
+The data pipeline is in place, and rolling historical and normal-model baselines have been implemented. The next step is to add a volatility-aware model and compare exception behavior across methods.
