@@ -1,4 +1,4 @@
-"""Compare historical, normal, EWMA, and GARCH VaR and ES forecasts."""
+"""Compare historical, normal, EWMA, and normal/Student-t GARCH forecasts."""
 
 from math import erfc, exp, log, pi, sqrt
 from pathlib import Path
@@ -7,6 +7,7 @@ from statistics import NormalDist
 import numpy as np
 import pandas as pd
 from arch import arch_model
+from arch.univariate import StudentsT
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -20,7 +21,9 @@ EWMA_INITIALIZATION_SIZE = 20
 REGIME_VOLATILITY_WINDOW = 20
 REGIME_HIGH_VOLATILITY_QUANTILE = 0.75
 GARCH_REFIT_INTERVAL = 21
-MODELS = ("historical", "normal", "ewma_fhs", "garch")
+SCORE_DIFFERENCE_HAC_LAGS = GARCH_REFIT_INTERVAL - 1
+GARCH_VARIANTS = (("garch", "normal"), ("garch_t", "t"))
+MODELS = ("historical", "normal", "ewma_fhs", "garch", "garch_t")
 
 
 def historical_es(window_returns: np.ndarray, tail_probability: float) -> float:
@@ -84,10 +87,25 @@ def make_forecasts(
         for level in CONFIDENCE_LEVELS
         for kind in ("var", "es")
     }
-    garch_mean_estimates = np.full(len(return_values), np.nan)
-    garch_variance_estimates = np.full(len(return_values), np.nan)
-    garch_parameters = None
-    garch_variance_pct_squared = None
+    garch_states = {
+        model_name: {
+            "distribution": distribution,
+            "parameters": None,
+            "variance_pct_squared": None,
+            "tail_parameters": {},
+        }
+        for model_name, distribution in GARCH_VARIANTS
+    }
+    garch_risk_estimates = {
+        model_name: {
+            kind: {
+                int(confidence * 100): np.full(len(return_values), np.nan)
+                for confidence in CONFIDENCE_LEVELS
+            }
+            for kind in ("var", "es")
+        }
+        for model_name, _ in GARCH_VARIANTS
+    }
 
     for position in range(window_size, len(return_values)):
         prior_window = return_values[position - window_size : position]
@@ -95,44 +113,79 @@ def make_forecasts(
             ewma_estimates[key][position] = value
 
         should_refit_garch = (position - window_size) % GARCH_REFIT_INTERVAL == 0
-        if should_refit_garch:
-            fitted_garch = arch_model(
-                prior_window * 100,
-                mean="Constant",
-                vol="GARCH",
-                p=1,
-                o=0,
-                q=1,
-                dist="normal",
-                rescale=False,
-            ).fit(update_freq=0, disp="off")
-            if fitted_garch.convergence_flag != 0:
-                raise RuntimeError(
-                    f"GARCH(1,1) estimation did not converge at "
-                    f"{portfolio_returns.index[position]} (window={window_size})."
+        for model_name, distribution in GARCH_VARIANTS:
+            state = garch_states[model_name]
+            if should_refit_garch:
+                fitted_garch = arch_model(
+                    prior_window * 100,
+                    mean="Constant",
+                    vol="GARCH",
+                    p=1,
+                    o=0,
+                    q=1,
+                    dist=distribution,
+                    rescale=False,
+                ).fit(update_freq=0, disp="off")
+                if fitted_garch.convergence_flag != 0:
+                    raise RuntimeError(
+                        f"{model_name} estimation did not converge at "
+                        f"{portfolio_returns.index[position]} "
+                        f"(window={window_size})."
+                    )
+                parameters = fitted_garch.params
+                nu = float(parameters["nu"]) if distribution == "t" else None
+                state["parameters"] = (
+                    float(parameters["mu"]),
+                    float(parameters["omega"]),
+                    float(parameters["alpha[1]"]),
+                    float(parameters["beta[1]"]),
+                    nu,
                 )
-            parameters = fitted_garch.params
-            garch_parameters = (
-                float(parameters["mu"]),
-                float(parameters["omega"]),
-                float(parameters["alpha[1]"]),
-                float(parameters["beta[1]"]),
-            )
-            garch_variance_pct_squared = float(
-                fitted_garch.forecast(horizon=1, reindex=False)
-                .residual_variance.iloc[-1, 0]
-            )
-        else:
-            mean_pct, omega, alpha, beta = garch_parameters
-            latest_innovation_pct = return_values[position - 1] * 100 - mean_pct
-            garch_variance_pct_squared = (
-                omega
-                + alpha * latest_innovation_pct**2
-                + beta * garch_variance_pct_squared
-            )
+                state["variance_pct_squared"] = float(
+                    fitted_garch.forecast(horizon=1, reindex=False)
+                    .residual_variance.iloc[-1, 0]
+                )
+                for confidence in CONFIDENCE_LEVELS:
+                    level = int(confidence * 100)
+                    tail_probability = 1 - confidence
+                    if distribution == "normal":
+                        quantile = NormalDist().inv_cdf(tail_probability)
+                        density = exp(-0.5 * quantile**2) / sqrt(2 * pi)
+                        tail_mean = -density / tail_probability
+                    else:
+                        standardized_t = StudentsT()
+                        quantile = float(
+                            standardized_t.ppf(
+                                [tail_probability], parameters=[nu]
+                            )[0]
+                        )
+                        tail_mean = float(
+                            standardized_t.partial_moment(
+                                1, z=quantile, parameters=[nu]
+                            )
+                            / tail_probability
+                        )
+                    state["tail_parameters"][level] = (quantile, tail_mean)
+            else:
+                mean_pct, omega, alpha, beta, _ = state["parameters"]
+                latest_innovation_pct = return_values[position - 1] * 100 - mean_pct
+                state["variance_pct_squared"] = (
+                    omega
+                    + alpha * latest_innovation_pct**2
+                    + beta * state["variance_pct_squared"]
+                )
 
-        garch_mean_estimates[position] = garch_parameters[0] / 100
-        garch_variance_estimates[position] = garch_variance_pct_squared / 10_000
+            mean_pct = state["parameters"][0]
+            volatility_pct = sqrt(state["variance_pct_squared"])
+            for confidence in CONFIDENCE_LEVELS:
+                level = int(confidence * 100)
+                quantile, tail_mean = state["tail_parameters"][level]
+                garch_risk_estimates[model_name]["var"][level][position] = -(
+                    mean_pct + volatility_pct * quantile
+                ) / 100
+                garch_risk_estimates[model_name]["es"][level][position] = -(
+                    mean_pct + volatility_pct * tail_mean
+                ) / 100
 
     for confidence in CONFIDENCE_LEVELS:
         level = int(confidence * 100)
@@ -173,20 +226,19 @@ def make_forecasts(
             portfolio_returns < -ewma_var
         ).where(ewma_var.notna())
 
-        garch_mean = pd.Series(garch_mean_estimates, index=forecasts.index)
-        garch_standard_deviation = pd.Series(
-            np.sqrt(garch_variance_estimates), index=forecasts.index
-        )
-        garch_var = -(garch_mean + normal_quantile * garch_standard_deviation)
-        garch_expected_shortfall = -(
-            garch_mean
-            - garch_standard_deviation * normal_density / tail_probability
-        )
-        forecasts[f"garch_var_{level}"] = garch_var
-        forecasts[f"garch_es_{level}"] = garch_expected_shortfall
-        forecasts[f"garch_exception_{level}"] = (
-            portfolio_returns < -garch_var
-        ).where(garch_var.notna())
+        for model_name, _ in GARCH_VARIANTS:
+            garch_var = pd.Series(
+                garch_risk_estimates[model_name]["var"][level],
+                index=forecasts.index,
+            )
+            forecasts[f"{model_name}_var_{level}"] = garch_var
+            forecasts[f"{model_name}_es_{level}"] = pd.Series(
+                garch_risk_estimates[model_name]["es"][level],
+                index=forecasts.index,
+            )
+            forecasts[f"{model_name}_exception_{level}"] = (
+                portfolio_returns < -garch_var
+            ).where(garch_var.notna())
 
     return forecasts
 
@@ -250,17 +302,114 @@ def christoffersen_independence_test(
     return statistic, erfc(sqrt(statistic / 2))
 
 
-def fz0_score(losses: np.ndarray, var: np.ndarray, es: np.ndarray, tail_rate: float) -> float:
-    """Return the mean joint VaR-ES FZ0 score for positive loss forecasts."""
+def fz0_score_values(
+    losses: np.ndarray, var: np.ndarray, es: np.ndarray, tail_rate: float
+) -> np.ndarray:
+    """Return observation-level joint FZ0 scores for positive loss forecasts."""
     if np.any(es <= 0):
         raise ValueError("FZ0 scoring requires positive expected-shortfall forecasts.")
-    score = (
+    return (
         (losses >= var) * (losses - var) / (tail_rate * es)
         + var / es
         + np.log(es)
         - 1
     )
-    return float(score.mean())
+
+
+def fz0_score(losses: np.ndarray, var: np.ndarray, es: np.ndarray, tail_rate: float) -> float:
+    """Return the mean joint VaR-ES FZ0 score for positive loss forecasts."""
+    return float(fz0_score_values(losses, var, es, tail_rate).mean())
+
+
+def newey_west_mean_test(
+    score_differences: np.ndarray, max_lag: int
+) -> tuple[float, float, float]:
+    """Test a paired mean score difference using a Bartlett HAC variance."""
+    differences = np.asarray(score_differences, dtype=float)
+    sample_size = len(differences)
+    mean_difference = float(differences.mean())
+    centered = differences - mean_difference
+    long_run_variance = float(np.dot(centered, centered) / sample_size)
+
+    for lag in range(1, min(max_lag, sample_size - 1) + 1):
+        autocovariance = float(
+            np.dot(centered[lag:], centered[:-lag]) / sample_size
+        )
+        bartlett_weight = 1 - lag / (max_lag + 1)
+        long_run_variance += 2 * bartlett_weight * autocovariance
+
+    standard_error = sqrt(max(0.0, long_run_variance) / sample_size)
+    if standard_error == 0:
+        return mean_difference, np.nan, np.nan
+    statistic = mean_difference / standard_error
+    p_value = erfc(abs(statistic) / sqrt(2))
+    return mean_difference, statistic, p_value
+
+
+def summarize_score_comparisons(forecasts: pd.DataFrame) -> pd.DataFrame:
+    """Compare paired FZ0 score differences with Newey-West HAC tests."""
+    comparisons = (
+        ("garch_t", "garch", "GARCH Student-t minus GARCH Normal"),
+        ("garch_t", "ewma_fhs", "GARCH Student-t minus EWMA-FHS"),
+    )
+    rows = []
+
+    for confidence in CONFIDENCE_LEVELS:
+        level = int(confidence * 100)
+        required_models = tuple(
+            dict.fromkeys(
+                model
+                for first_model, second_model, _ in comparisons
+                for model in (first_model, second_model)
+            )
+        )
+        required_columns = [
+            f"{model}_{kind}_{level}"
+            for model in required_models
+            for kind in ("var", "es")
+        ]
+        scored = forecasts.dropna(subset=required_columns)
+        losses = -scored["portfolio_return"].to_numpy()
+        tail_probability = 1 - confidence
+
+        for first_model, second_model, comparison in comparisons:
+            first_scores = fz0_score_values(
+                losses,
+                scored[f"{first_model}_var_{level}"].to_numpy(),
+                scored[f"{first_model}_es_{level}"].to_numpy(),
+                tail_probability,
+            )
+            second_scores = fz0_score_values(
+                losses,
+                scored[f"{second_model}_var_{level}"].to_numpy(),
+                scored[f"{second_model}_es_{level}"].to_numpy(),
+                tail_probability,
+            )
+            mean_difference, statistic, p_value = newey_west_mean_test(
+                first_scores - second_scores, SCORE_DIFFERENCE_HAC_LAGS
+            )
+            rows.append(
+                {
+                    "confidence_level": confidence,
+                    "comparison": comparison,
+                    "forecast_count": len(scored),
+                    "mean_score_difference": mean_difference,
+                    "hac_lags": SCORE_DIFFERENCE_HAC_LAGS,
+                    "test_statistic": statistic,
+                    "p_value": p_value,
+                }
+            )
+
+    results = pd.DataFrame(rows)
+    p_values = results["p_value"].to_numpy()
+    order = np.argsort(p_values)
+    adjusted = np.empty(len(p_values))
+    adjusted_sorted = np.maximum.accumulate(
+        (len(p_values) - np.arange(len(p_values))) * p_values[order]
+    )
+    adjusted[order] = np.minimum(1.0, adjusted_sorted)
+    results["holm_adjusted_p_value"] = adjusted
+    return results
 
 
 def summarize_forecasts(
@@ -402,6 +551,7 @@ def main() -> None:
     forecasts = make_forecasts(portfolio_returns)
     summary = summarize_forecasts(forecasts)
     regime_summary = summarize_by_volatility_regime(forecasts, WINDOW_SIZE)
+    score_comparison = summarize_score_comparisons(forecasts)
     common_evaluation_start = max(SENSITIVITY_WINDOW_SIZES)
     sensitivity_summaries = []
     for window_size in SENSITIVITY_WINDOW_SIZES:
@@ -425,18 +575,22 @@ def main() -> None:
     summary_path = OUTPUT_DIR / "var_es_summary.csv"
     regime_summary_path = OUTPUT_DIR / "var_es_regime_summary.csv"
     sensitivity_summary_path = OUTPUT_DIR / "var_es_window_sensitivity.csv"
+    score_comparison_path = OUTPUT_DIR / "var_es_score_comparison.csv"
     forecasts.to_csv(forecasts_path, index_label="date")
     summary.to_csv(summary_path, index=False)
     regime_summary.to_csv(regime_summary_path, index=False)
     sensitivity_summary.to_csv(sensitivity_summary_path, index=False)
+    score_comparison.to_csv(score_comparison_path, index=False)
 
     print(f"Saved forecasts to {forecasts_path}")
     print(f"Saved comparison summary to {summary_path}")
     print(f"Saved volatility-regime summary to {regime_summary_path}")
     print(f"Saved window-sensitivity summary to {sensitivity_summary_path}")
+    print(f"Saved paired score comparisons to {score_comparison_path}")
     print(summary.to_string(index=False))
     print(regime_summary.to_string(index=False))
     print(sensitivity_summary.to_string(index=False))
+    print(score_comparison.to_string(index=False))
 
 
 if __name__ == "__main__":

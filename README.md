@@ -22,6 +22,7 @@ The models to compare are:
 2. A parametric model with normally distributed returns
 3. Filtered historical simulation with EWMA volatility
 4. A constant-mean GARCH(1,1) model with normal innovations
+5. A constant-mean GARCH(1,1) model with standardized Student-t innovations
 
 For each method, the project will estimate 95% and 99% VaR and ES. The estimates will be tested against returns that were not used to fit the models. The comparison will consider how often losses exceed VaR, the size of losses beyond VaR, and how results differ across market conditions.
 
@@ -33,14 +34,15 @@ The first comparison uses the previous 1,000 trading days of portfolio returns t
 - A normal model, which estimates the tail from the rolling mean and standard deviation
 - EWMA filtered historical simulation, which rescales past returns by their estimated volatility before estimating the tail
 - GARCH(1,1) with normal innovations, which models volatility clustering and refits its parameters every 21 trading days
+- GARCH(1,1) with standardized Student-t innovations, which allows heavier conditional tails and uses the same refit schedule
 
-Each day's forecast uses only earlier returns. The historical, normal, EWMA, and GARCH models use a 1,000-day window; GARCH parameters are estimated from that trailing window every 21 trading days, with conditional variance updated daily. The EWMA model uses a daily decay factor of 0.94, following the [RiskMetrics technical document](https://www.msci.com/documents/10199/5915b101-4206-4ba0-aee2-3449d5c7e95a). The GARCH specification follows the [arch package's model documentation](https://arch.readthedocs.io/en/stable/univariate/univariate_volatility_modeling.html).
+Each day's forecast uses only earlier returns. The historical, normal, and EWMA models use a 1,000-day window; both GARCH variants estimate parameters from that trailing window every 21 trading days and update conditional variance daily. The Student-t distribution is standardized to unit variance. The EWMA model uses a daily decay factor of 0.94, following the [RiskMetrics technical document](https://www.msci.com/documents/10199/5915b101-4206-4ba0-aee2-3449d5c7e95a). The GARCH specification and Student-t distribution follow the [`arch` package documentation](https://arch.readthedocs.io/en/stable/univariate/univariate_volatility_modeling.html) and its [`StudentsT` reference](https://arch.readthedocs.io/en/stable/univariate/generated/arch.univariate.StudentsT.html).
 
-The summary also reports Kupiec unconditional-coverage tests and Christoffersen independence and conditional-coverage tests for VaR exceptions. For joint VaR-ES comparison, it reports the mean FZ0 score, where a lower score is better. The [initial findings](reports/initial_findings.md) explain the results and their limitations; the tests follow [Kupiec](https://fedinprint.org/item/fedgfe/34596/original), [Christoffersen](https://users.ssc.wisc.edu/~bhansen/718/Christoffersen1998.pdf), and the joint scoring framework of [Fissler, Ziegel, and Gneiting](https://arxiv.org/abs/1507.00244).
+The summary also reports Kupiec unconditional-coverage tests and Christoffersen independence and conditional-coverage tests for VaR exceptions. For joint VaR-ES comparison, it reports the mean FZ0 score, where a lower score is better. A paired Newey-West HAC test compares daily FZ0 score differences for Student-t GARCH against normal GARCH and EWMA-FHS, with Holm-adjusted p-values across the four comparisons. These score tests use 20 lags. The [initial findings](reports/initial_findings.md) explain the results and their limitations; the tests follow [Kupiec](https://fedinprint.org/item/fedgfe/34596/original), [Christoffersen](https://users.ssc.wisc.edu/~bhansen/718/Christoffersen1998.pdf), and the joint scoring framework of [Fissler, Ziegel, and Gneiting](https://arxiv.org/abs/1507.00244).
 
 The same script compares forecasts in lower- and high-volatility regimes. It classifies each date from annualized volatility over the prior 20 trading days, with the high-volatility cutoff set to the 75th percentile of the initial 1,000-day training period. This regime summary is saved as `var_es_regime_summary.csv` in `data/processed/`.
 
-It also compares 500-, 1,000-, and 1,500-day estimation windows on a shared evaluation period, so the results are not driven by different market dates. Those results are saved as `var_es_window_sensitivity.csv` in `data/processed/`.
+It also compares 500-, 1,000-, and 1,500-day estimation windows on a shared evaluation period, so the results are not driven by different market dates. Those results are saved as `var_es_window_sensitivity.csv` in `data/processed/`. Paired daily score differences are saved as `var_es_score_comparison.csv` in the same directory.
 
 Install the project dependencies, including `arch` for GARCH estimation:
 
@@ -54,7 +56,7 @@ Then run it after downloading the data:
 python3 src/backtest_var_es.py
 ```
 
-It writes the forecasts, model summary, volatility-regime summary, and window-sensitivity summary to `data/processed/`.
+It writes forecasts, model and regime summaries, window sensitivity, and paired FZ0 score comparisons to `data/processed/`.
 
 Generate the 99% VaR/ES comparison chart after the model script:
 
@@ -84,4 +86,4 @@ See [the initial findings](reports/initial_findings.md) for the first exception-
 
 ## Project status
 
-The data pipeline, four rolling VaR/ES models, VaR exception diagnostics, joint VaR-ES scoring, volatility-regime and rolling-window comparisons, an out-of-sample 99% chart, and an initial findings report are in place. The current findings are specific to this portfolio and sample; a useful next step is to investigate a heavy-tailed innovation distribution for GARCH.
+The data pipeline, five rolling VaR/ES model variants, VaR exception diagnostics, joint VaR-ES scoring and paired score tests, volatility-regime and rolling-window comparisons, an out-of-sample 99% chart, and an initial findings report are in place. The current findings are specific to this portfolio and sample; a useful next step is to check robustness with a block bootstrap or a second portfolio.

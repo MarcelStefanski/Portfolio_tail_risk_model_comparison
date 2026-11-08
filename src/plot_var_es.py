@@ -15,6 +15,7 @@ MODELS = (
     ("normal", "Normal model"),
     ("ewma_fhs", "EWMA filtered historical simulation"),
     ("garch", "GARCH(1,1) with normal innovations"),
+    ("garch_t", "GARCH(1,1) with Student-t innovations"),
 )
 
 
@@ -45,7 +46,7 @@ def main() -> None:
     fig, axes = plt.subplots(
         len(MODELS),
         1,
-        figsize=(14, 12),
+        figsize=(14, 14),
         sharex=True,
         sharey=True,
     )
